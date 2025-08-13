@@ -146,7 +146,7 @@ export const formatContentForCopying = ({
 
   // Add user instructions block FIRST if present
   if (userInstructions.trim()) {
-    concatenatedString += `<user_instructions>\n${userInstructions.trim()}\n</user_instructions>\n\n`;
+    concatenatedString += `<user_instructions>\n${userInstructions.trim()}\n</user_instructions>\n`;
   }
 
   // Add ASCII file tree if enabled within <file_map> tags
