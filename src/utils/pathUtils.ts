@@ -296,3 +296,79 @@ export function join(...segments: (string | null | undefined)[]): string {
 
   return normalizedSegments.join('/');
 }
+
+/**
+ * Resolve a relative path against a base path, handling '.', '..', and cross-platform roots.
+ */
+export function resolvePath(basePath: string, relativePath: string): string {
+  const normalizedBase = normalizePath(basePath);
+  const normalizedRelative = normalizePath(relativePath);
+
+  if (!normalizedRelative) {
+    return normalizedBase;
+  }
+
+  // Treat already absolute/anchored paths as-is
+  if (
+    normalizedRelative.startsWith('//') ||
+    normalizedRelative.startsWith('/') ||
+    /^[a-z]:/i.test(normalizedRelative)
+  ) {
+    return normalizedRelative;
+  }
+
+  const basePartsRaw = normalizedBase.split('/');
+  const baseParts: string[] = [];
+
+  basePartsRaw.forEach((part, index) => {
+    const isTrailingEmpty = part === '' && index === basePartsRaw.length - 1 && index !== 0;
+    const isDuplicateNetworkPart =
+      part === '' && index > 1 && basePartsRaw[index - 1] === '' && basePartsRaw[index - 2] === '';
+
+    if (isTrailingEmpty || isDuplicateNetworkPart) {
+      return;
+    }
+
+    baseParts.push(part);
+  });
+
+  const resolvedParts = [...baseParts];
+  const relativeParts = normalizedRelative.split('/');
+
+  for (const part of relativeParts) {
+    if (!part || part === '.') {
+      continue;
+    }
+
+    if (part === '..') {
+      if (resolvedParts.length === 0) {
+        continue;
+      }
+
+      const last = resolvedParts[resolvedParts.length - 1];
+      const isWindowsDriveRoot = /^[a-z]:$/i.test(last);
+      const isPosixRoot = resolvedParts.length === 1 && last === '';
+      const isNetworkRoot =
+        resolvedParts.length === 2 && resolvedParts[0] === '' && resolvedParts[1] === '';
+
+      if (isWindowsDriveRoot || isPosixRoot || isNetworkRoot) {
+        continue;
+      }
+
+      resolvedParts.pop();
+      continue;
+    }
+
+    resolvedParts.push(part);
+  }
+
+  if (resolvedParts.length === 0) {
+    return '';
+  }
+
+  if (resolvedParts.length === 1 && resolvedParts[0] === '') {
+    return '/';
+  }
+
+  return resolvedParts.join('/');
+}

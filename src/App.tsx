@@ -28,12 +28,16 @@ import CopyHistoryModal, { CopyHistoryItem } from './components/CopyHistoryModal
 import CopyHistoryButton from './components/CopyHistoryButton';
 import ModelDropdown from './components/ModelDropdown';
 import ToggleSwitch from './components/base/ToggleSwitch';
+import DependencySelectionModal from './components/DependencySelectionModal';
+
+// Import path resolver directly to avoid require() issues
+import * as pathResolver from './utils/pathResolver';
 
 /**
  * Import path utilities for handling file paths across different operating systems.
  * While not all utilities are used directly, they're kept for consistency and future use.
  */
-import { normalizePath, arePathsEqual, isSubPath, join, dirname } from './utils/pathUtils';
+import { normalizePath, arePathsEqual, isSubPath, dirname } from './utils/pathUtils';
 
 /**
  * Import utility functions for content formatting and language detection.
@@ -59,6 +63,7 @@ const STORAGE_KEYS = {
   IGNORE_MODE: 'pastemax-ignore-mode',
   IGNORE_SETTINGS_MODIFIED: 'pastemax-ignore-settings-modified',
   INCLUDE_BINARY_PATHS: 'pastemax-include-binary-paths',
+  AUTO_INCLUDE_DEPENDENCIES: 'pastemax-auto-include-dependencies',
   TASK_TYPE: STORAGE_KEY_TASK_TYPE,
   WORKSPACES: 'pastemax-workspaces',
   CURRENT_WORKSPACE: 'pastemax-current-workspace',
@@ -160,6 +165,13 @@ const App = (): JSX.Element => {
   const [includeBinaryPaths, setIncludeBinaryPaths] = useState(
     localStorage.getItem(STORAGE_KEYS.INCLUDE_BINARY_PATHS) === 'true'
   );
+  const [autoIncludeDependencies, setAutoIncludeDependencies] = useState(
+    localStorage.getItem(STORAGE_KEYS.AUTO_INCLUDE_DEPENDENCIES) === 'true'
+  );
+  const [detectedDependencies, setDetectedDependencies] = useState<string[]>([]);
+  const [selectedDependencies, setSelectedDependencies] = useState<string[]>([]);
+  const [isDependencyModalOpen, setIsDependencyModalOpen] = useState(false);
+  const [isDetectingDependencies, setIsDetectingDependencies] = useState(false);
 
   /* ============================== STATE: UI Controls ============================== */
   const [sortDropdownOpen, setSortDropdownOpen] = useState(false);
@@ -319,6 +331,26 @@ const App = (): JSX.Element => {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.INCLUDE_BINARY_PATHS, String(includeBinaryPaths));
   }, [includeBinaryPaths]);
+
+  // Persist autoIncludeDependencies when it changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.AUTO_INCLUDE_DEPENDENCIES, String(autoIncludeDependencies));
+  }, [autoIncludeDependencies]);
+
+  // Detect dependencies when toggle is enabled and files are selected
+  useEffect(() => {
+    if (autoIncludeDependencies && selectedFiles.length > 0 && allFiles.length > 0 && !isDetectingDependencies) {
+      // Use setTimeout to avoid blocking the UI
+      const timeoutId = setTimeout(() => {
+        detectDependencies();
+      }, 100);
+
+      return () => clearTimeout(timeoutId);
+    } else {
+      setDetectedDependencies([]);
+      setSelectedDependencies([]);
+    }
+  }, [autoIncludeDependencies, selectedFiles.length, allFiles.length, isDetectingDependencies]); // Only depend on length, not the arrays themselves
 
   // Persist task type when it changes
   useEffect(() => {
@@ -734,9 +766,19 @@ const App = (): JSX.Element => {
         return sortDir === 'asc' ? comparison : -comparison;
       });
 
+      const normalizedSelected = selectedFiles.map((path) => normalizePath(path));
+      normalizedSelected.forEach((selectedPath) => {
+        if (!sorted.some((file) => arePathsEqual(file.path, selectedPath))) {
+          const matchingFile = files.find((file) => arePathsEqual(file.path, selectedPath));
+          if (matchingFile) {
+            sorted.push(matchingFile);
+          }
+        }
+      });
+
       setDisplayedFiles(sorted);
     },
-    [setDisplayedFiles]
+    [setDisplayedFiles, selectedFiles]
   );
 
   // Apply filters and sort whenever relevant state changes
@@ -824,11 +866,17 @@ const App = (): JSX.Element => {
 
       if (isSelected) {
         // Remove the file from selected files
-        return prev.filter((path: string) => !arePathsEqual(path, normalizedPath));
-      } else {
-        // Add the file to selected files
-        return [...prev, normalizedPath];
+        const updatedSelection = prev.filter((path: string) => !arePathsEqual(path, normalizedPath));
+        if (updatedSelection.length !== prev.length) {
+          setSelectedDependencies((prevDeps) =>
+            prevDeps.filter((dep) => !arePathsEqual(dep, normalizedPath))
+          );
+        }
+        return updatedSelection;
       }
+
+      // Add the file to selected files
+      return [...prev, normalizedPath];
     });
   };
 
@@ -1062,6 +1110,7 @@ const App = (): JSX.Element => {
         sortOrder,
         includeFileTree,
         includeBinaryPaths,
+        selectedDependencies,
         selectedFolder,
       });
 
@@ -1090,6 +1139,7 @@ const App = (): JSX.Element => {
     sortOrder,
     includeFileTree,
     includeBinaryPaths,
+    selectedDependencies,
     selectedFolder,
     isElectron,
   ]);
@@ -1490,15 +1540,114 @@ const App = (): JSX.Element => {
     localStorage.removeItem(STORAGE_KEYS.COPY_HISTORY);
   };
 
+  // Detect dependencies for selected files
+  const detectDependencies = useCallback(() => {
+    console.log('🔍 Starting dependency detection...');
+
+    if (selectedFiles.length === 0 || allFiles.length === 0 || isDetectingDependencies) {
+      console.log('⚠️ No files selected, no files loaded, or already detecting');
+      return;
+    }
+
+    console.log(`📁 Selected files: ${selectedFiles.length}`);
+    console.log(`📂 Total files: ${allFiles.length}`);
+
+    setIsDetectingDependencies(true);
+
+    const selectedFileData = allFiles.filter((file) =>
+      selectedFiles.some((selectedPath) => arePathsEqual(selectedPath, file.path))
+    );
+
+    try {
+      console.log('🔧 Using direct pathResolver import...');
+      console.log('🔧 Available functions:', Object.keys(pathResolver));
+
+      if (!pathResolver.getDependencyFiles) {
+        console.error('❌ getDependencyFiles function not found in pathResolver');
+        return;
+      }
+
+      console.log('🔧 Calling getDependencyFiles...');
+      const dependencies = pathResolver.getDependencyFiles(selectedFileData, allFiles, selectedFolder || '');
+      console.log(`🔗 Found ${dependencies.length} dependencies`);
+      console.log('🔗 Dependencies:', dependencies);
+
+      const dependencyPaths = dependencies.map((file: FileData) => normalizePath(file.path));
+      console.log('[Dependencies] Paths:', dependencyPaths);
+
+      const newDependencies = dependencyPaths.filter((path) => {
+        const alreadySelected = selectedFiles.some((selectedPath) => arePathsEqual(selectedPath, path));
+        const alreadyDetected = detectedDependencies.some((detectedPath) => arePathsEqual(detectedPath, path));
+        return !alreadySelected && !alreadyDetected;
+      });
+
+      console.log(`[Dependencies] New dependencies to show: ${newDependencies.length}`);
+      if (newDependencies.length > 0) {
+        setDetectedDependencies(newDependencies);
+        setIsDependencyModalOpen(true);
+        console.log('✅ Modal opened with dependencies');
+      } else {
+        console.log('ℹ️ No new dependencies found - check if files have imports');
+        // Show a brief message to the user
+        setTimeout(() => {
+          console.log('💡 Tip: Make sure your selected files contain import statements');
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('❌ Error detecting dependencies:', error);
+      console.error('❌ Error details:', error.message, error.stack);
+      // Don't crash the app, just log the error and continue
+    } finally {
+      setIsDetectingDependencies(false);
+    }
+  }, [selectedFiles, allFiles, selectedFolder, isDetectingDependencies, detectedDependencies]);
+
+  // Handle dependency selection
+  const handleDependencySelection = (selectedDeps: string[]) => {
+    console.log('?o. Dependencies selected:', selectedDeps);
+    const normalizedDeps = selectedDeps.map((dep) => normalizePath(dep));
+    const previousDeps = selectedDependencies.map((dep) => normalizePath(dep));
+
+    setSelectedFiles((prev: string[]) => {
+      const updatedSelection = prev.filter((path) => {
+        const wasDependency = previousDeps.some((dep) => arePathsEqual(dep, path));
+        if (!wasDependency) {
+          return true;
+        }
+        return normalizedDeps.some((dep) => arePathsEqual(dep, path));
+      });
+
+      normalizedDeps.forEach((dep) => {
+        if (!updatedSelection.some((path) => arePathsEqual(path, dep))) {
+          updatedSelection.push(dep);
+        }
+      });
+
+      return updatedSelection;
+    });
+
+    setSelectedDependencies(normalizedDeps);
+    setIsDependencyModalOpen(false);
+  };
+
+  // Toggle dependency selection
+  const toggleDependencySelection = (path: string, selected: boolean) => {
+    const normalizedPath = normalizePath(path);
+    setSelectedDependencies((prev) => {
+      if (selected) {
+        if (prev.some((existing) => arePathsEqual(existing, normalizedPath))) {
+          return prev;
+        }
+        return [...prev, normalizedPath];
+      }
+      return prev.filter((existing) => !arePathsEqual(existing, normalizedPath));
+    });
+  };
   const handleManageCustomTaskTypes = () => {
     setIsCustomTaskTypeModalOpen(true);
   };
-
   const handleCustomTaskTypesUpdated = () => {
-    // Force reload task types by triggering a re-render with a temporary state update
-    // This creates a state change that will cause the TaskTypeSelector to reload custom types
-    const currentTaskType = selectedTaskType;
-    // Temporarily set to the first default type and then back to selected
+
     setSelectedTaskType('none');
     setTimeout(() => {
       setSelectedTaskType(currentTaskType);
@@ -1702,7 +1851,7 @@ const App = (): JSX.Element => {
               <div className="content-header-actions-group">
                 <div className="stats-info">
                   {selectedFolder
-                    ? `${displayedFiles.length} files | ~${totalFormattedContentTokens.toLocaleString()} tokens`
+                    ? `${selectedFiles.length} files | ~${totalFormattedContentTokens.toLocaleString()} tokens`
                     : '0 files | ~0 tokens'}
                 </div>
                 {selectedFolder && (
@@ -1826,6 +1975,31 @@ const App = (): JSX.Element => {
                   />
                   <label htmlFor="includeBinaryPaths">Include Binary As Paths</label>
                 </div>
+                <div className="toggle-option-item dependency-option">
+                  <div className="dependency-toggle-group">
+                    <ToggleSwitch
+                      id="autoIncludeDependencies"
+                      checked={autoIncludeDependencies}
+                      onChange={(e) => setAutoIncludeDependencies(e.target.checked)}
+                    />
+                    <label htmlFor="autoIncludeDependencies">Detect Dependencies</label>
+                    <button
+                      className={`dependency-detect-button ${isDetectingDependencies ? 'detecting' : ''}`}
+                      onClick={() => {
+                        console.log('🔘 Detect button clicked!');
+                        console.log('📁 Selected files:', selectedFiles.length);
+                        console.log('📂 All files:', allFiles.length);
+                        console.log('🔍 Auto include dependencies:', autoIncludeDependencies);
+                        console.log('⚡ Is detecting:', isDetectingDependencies);
+                        detectDependencies();
+                      }}
+                      disabled={selectedFiles.length === 0 || isDetectingDependencies}
+                      title={isDetectingDependencies ? "Detecting dependencies..." : "Manually detect dependencies for selected files"}
+                    >
+                      {isDetectingDependencies ? "Detecting..." : "Detect"}
+                    </button>
+                  </div>
+                </div>
               </div>
               <div className="copy-buttons-group">
                 <CopyHistoryButton
@@ -1894,9 +2068,20 @@ const App = (): JSX.Element => {
           workspaceName={confirmFolderModalDetails.workspaceName}
           folderPath={confirmFolderModalDetails.folderPath}
         />
+
+        <DependencySelectionModal
+          isOpen={isDependencyModalOpen}
+          onClose={() => setIsDependencyModalOpen(false)}
+          onConfirm={handleDependencySelection}
+          detectedDependencies={detectedDependencies}
+          allFiles={allFiles}
+          selectedDependencies={selectedDependencies}
+          onToggleDependency={toggleDependencySelection}
+        />
       </div>
     </ThemeProvider>
   );
 };
 
 export default App;
+

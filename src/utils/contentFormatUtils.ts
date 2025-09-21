@@ -38,12 +38,20 @@ export const formatBaseFileContent = ({
   sortOrder,
   includeFileTree,
   includeBinaryPaths,
+  selectedDependencies,
   selectedFolder,
-}: Omit<FormatContentParams, 'userInstructions'>): string => {
+}: Omit<FormatContentParams, 'userInstructions'> & { selectedDependencies: string[] }): string => {
+  // Get initially selected files
+  let filesToProcess = files.filter((file: FileData) => selectedFiles.includes(file.path));
+
+  // Add selected dependency files
+  if (selectedDependencies.length > 0) {
+    const dependencyFiles = files.filter((file: FileData) => selectedDependencies.includes(file.path));
+    filesToProcess = [...filesToProcess, ...dependencyFiles];
+  }
+
   // Sort files according to current sort settings
-  const sortedSelected = files
-    .filter((file: FileData) => selectedFiles.includes(file.path))
-    .sort((a: FileData, b: FileData) => {
+  const sortedSelected = filesToProcess.sort((a: FileData, b: FileData) => {
       let comparison = 0;
       const [sortKey, sortDir] = sortOrder.split('-');
 

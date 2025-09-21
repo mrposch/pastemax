@@ -155,6 +155,50 @@
   user-select: none;
 }
 
+.dependency-option {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
+.dependency-toggle-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+}
+
+.dependency-detect-button {
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  background-color: var(--background-secondary);
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.dependency-detect-button:hover:not(:disabled) {
+  background-color: var(--background-hover);
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}
+
+.dependency-detect-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dependency-detect-button.detecting {
+  background-color: var(--accent-color);
+  color: var(--background-primary);
+  border-color: var(--accent-color);
+  cursor: not-allowed;
+}
+
 .copy-settings-container > .copy-settings-options {
   flex-shrink: 0;
 }
